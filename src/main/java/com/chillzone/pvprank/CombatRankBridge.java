@@ -2,6 +2,8 @@ package com.chillzone.pvprank;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.scores.PlayerTeam;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -16,6 +18,7 @@ final class CombatRankBridge {
     private final Field rankPosition;
     private final Field rank;
     private final Field playerName;
+    private boolean compactNametags = true;
 
     CombatRankBridge() throws ReflectiveOperationException {
         Class<?> dataManager = Class.forName("com.combat.DataManager");
@@ -52,7 +55,16 @@ final class CombatRankBridge {
 
     void setPosition(Object data, int pos) throws IllegalAccessException {
         rankPosition.setInt(data, pos);
-        rank.set(data, pos < 1 ? "Unranked" : "[#" + pos + "]");
+        rank.set(data, desiredStoredRank(pos));
+    }
+
+    void setCompactNametags(boolean compact) {
+        this.compactNametags = compact;
+    }
+
+    private String desiredStoredRank(int pos) {
+        if (pos < 1) return "Unranked";
+        return compactNametags ? "[#" + pos + "]" : "Rank #" + pos;
     }
 
     void setPlayerName(Object data, String name) throws IllegalAccessException {
@@ -67,7 +79,7 @@ final class CombatRankBridge {
         boolean changed = false;
         for (Object data : all().values()) {
             int pos = position(data);
-            String desired = pos < 1 ? "Unranked" : "[#" + pos + "]";
+            String desired = desiredStoredRank(pos);
             Object current = rank.get(data);
             if (current == null || !desired.equals(current.toString())) {
                 rank.set(data, desired);
@@ -81,10 +93,52 @@ final class CombatRankBridge {
     void refreshOnlineNametags(MinecraftServer server) {
         for (ServerPlayer p : server.getPlayerList().getPlayers()) {
             try {
+                // Always let Combat-Ranked build its native nametag first. Full mode
+                // intentionally keeps that [Rank #N] wording. Compact mode patches
+                // only the visible prefix afterward.
                 updatePlayerNametag.invoke(null, p);
+                enforceSelectedNametagStyle(server, p);
             } catch (ReflectiveOperationException e) {
                 System.err.println("[ChillZonePvPRankAdmin] Could not refresh nametag for " + p.getGameProfile().name());
             }
+        }
+    }
+
+    void enforceSelectedNametagStyle(MinecraftServer server) {
+        if (!compactNametags) return;
+        for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+            try {
+                enforceSelectedNametagStyle(server, p);
+            } catch (ReflectiveOperationException e) {
+                System.err.println("[ChillZonePvPRankAdmin] Could not enforce selected nametag style for " + p.getGameProfile().name());
+            }
+        }
+    }
+
+    private void enforceSelectedNametagStyle(MinecraftServer server, ServerPlayer player) throws ReflectiveOperationException {
+        // Full mode uses Combat-Ranked's native [Rank #N] prefix, which was just
+        // restored by updatePlayerNametag(). No extra patch is needed.
+        if (!compactNametags) return;
+
+        Object data = getOrCreate(player.getUUID());
+        int pos = position(data);
+
+        // Preserve Combat-Ranked's existing Unranked display exactly as-is.
+        if (pos < 1) return;
+
+        PlayerTeam team = server.getScoreboard().getPlayersTeam(player.getScoreboardName());
+        if (team == null) return;
+
+        String desired = "[#" + pos + "] ";
+        Component current = team.getPlayerPrefix();
+        if (current != null && desired.equals(current.getString())) return;
+
+        // Keep whatever styling/color Combat-Ranked already applied, but replace
+        // only the visible wording: [Rank #2] -> [#2].
+        if (current == null) {
+            team.setPlayerPrefix(Component.literal(desired));
+        } else {
+            team.setPlayerPrefix(Component.literal(desired).setStyle(current.getStyle()));
         }
     }
 

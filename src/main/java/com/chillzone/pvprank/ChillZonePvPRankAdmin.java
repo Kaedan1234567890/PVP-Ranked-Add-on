@@ -19,6 +19,7 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
     private static CombatRankBridge bridge;
     private static final ExclusionStore exclusions = new ExclusionStore();
     private static final RankStore rankStore = new RankStore();
+    private static final NametagSettings nametagSettings = new NametagSettings();
     private static int housekeepingTicks;
     private static boolean startupRestoreFinished;
 
@@ -33,8 +34,10 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
     public void onInitialize() {
         exclusions.load();
         rankStore.load();
+        nametagSettings.load();
         try {
             bridge = new CombatRankBridge();
+            bridge.setCompactNametags(nametagSettings.isCompact());
             System.out.println("[ChillZonePvPRankAdmin] Connected to Combat-Ranked.");
         } catch (ReflectiveOperationException e) {
             System.err.println("[ChillZonePvPRankAdmin] Combat-Ranked API bridge failed: " + e);
@@ -58,6 +61,12 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
                     .then(Commands.argument("player", StringArgumentType.word()).suggests(ONLINE_PLAYERS)
                         .executes(ctx -> resetRank(ctx.getSource(), StringArgumentType.getString(ctx, "player")))))
                 .then(Commands.literal("list").executes(ctx -> listRanks(ctx.getSource())))
+                .then(Commands.literal("nametag")
+                    .executes(ctx -> nametagStatus(ctx.getSource()))
+                    .then(Commands.literal("status").executes(ctx -> nametagStatus(ctx.getSource())))
+                    .then(Commands.literal("toggle").executes(ctx -> toggleNametagStyle(ctx.getSource())))
+                    .then(Commands.literal("compact").executes(ctx -> setNametagStyle(ctx.getSource(), true)))
+                    .then(Commands.literal("full").executes(ctx -> setNametagStyle(ctx.getSource(), false))))
                 .then(Commands.literal("resetall")
                     .then(Commands.literal("confirm").executes(ctx -> resetAll(ctx.getSource()))))
             );
@@ -130,6 +139,9 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
             }
             try {
                 if (bridge.normalizeDisplayLabels()) changed = true;
+                // Apply the selected nametag style. Compact mode overrides Combat-Ranked's
+                // native [Rank #N] prefix with [#N]; full mode leaves the native wording.
+                bridge.enforceSelectedNametagStyle(server);
             } catch (ReflectiveOperationException e) {
                 System.err.println("[ChillZonePvPRankAdmin] Could not normalize PvP rank labels: " + e.getMessage());
             }
@@ -241,6 +253,31 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
                 String name = bridge.name(e.getValue());
                 source.sendSuccess(() -> Component.literal("#" + pos + " - " + name), false);
             }
+            return 1;
+        } catch (ReflectiveOperationException e) {
+            return fail(source, e);
+        }
+    }
+
+    private static int nametagStatus(CommandSourceStack source) {
+        String style = nametagSettings.isCompact() ? "COMPACT ([#2])" : "FULL ([Rank #2])";
+        source.sendSuccess(() -> Component.literal("PvP nametag style: " + style), false);
+        return 1;
+    }
+
+    private static int toggleNametagStyle(CommandSourceStack source) {
+        return setNametagStyle(source, !nametagSettings.isCompact());
+    }
+
+    private static int setNametagStyle(CommandSourceStack source, boolean compact) {
+        if (!ready(source)) return 0;
+        nametagSettings.setCompact(compact);
+        bridge.setCompactNametags(compact);
+        try {
+            bridge.normalizeDisplayLabels();
+            bridge.refreshOnlineNametags(source.getServer());
+            String style = compact ? "compact ([#2])" : "full ([Rank #2])";
+            source.sendSuccess(() -> Component.literal("PvP nametag style set to " + style + ". This setting is saved across restarts."), false);
             return 1;
         } catch (ReflectiveOperationException e) {
             return fail(source, e);

@@ -62,3 +62,16 @@ On server start, the add-on restores the last saved ranking list into Combat-Ran
 - Rank saves use a temporary file + atomic replacement when supported, reducing the chance of a half-written save file.
 - Saved positions are restricted to unique Top 10 slots (#1-#10).
 - `/pvprank resetall confirm` still intentionally stores an empty list, so a deliberate owner reset remains empty after restart.
+
+### 0.1.4-alpha nametag fix
+Combat-Ranked 1.0.0 formats the visible scoreboard-team prefix separately from the stored `PlayerData.rank` text. This version therefore patches the actual live team prefix after Combat-Ranked updates it. Ranked players are forced to display `[#1]`, `[#2]`, etc. while the existing `Unranked` display is left unchanged. The prefix style/color already supplied by Combat-Ranked is preserved. The add-on re-checks online ranked players once per second so Combat-Ranked cannot quietly change the wording back to `[Rank #N]`.
+
+## 0.1.5-alpha toggleable nametag style
+The owner can now switch the ranked-player nametag wording without rebuilding the mod:
+
+- `/pvprank nametag toggle` — flip between compact and full style.
+- `/pvprank nametag compact` — force `[#2]`.
+- `/pvprank nametag full` — use Combat-Ranked's native `[Rank #2]`.
+- `/pvprank nametag status` (or just `/pvprank nametag`) — show the current style.
+
+The selected style is saved at `config/chillzone-pvprank-admin/settings.json` and survives server restarts. `Unranked` is unchanged in both modes. The default on first run is compact mode.
