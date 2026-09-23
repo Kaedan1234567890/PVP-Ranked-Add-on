@@ -19,7 +19,7 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
     private static CombatRankBridge bridge;
     private static final ExclusionStore exclusions = new ExclusionStore();
     private static final RankStore rankStore = new RankStore();
-    private static int ticks;
+    private static int housekeepingTicks;
     private static boolean startupRestoreFinished;
 
     private static final SuggestionProvider<CommandSourceStack> ONLINE_PLAYERS = (ctx, builder) -> {
@@ -65,10 +65,15 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
 
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             if (bridge == null) return;
+            startupRestoreFinished = false;
+            housekeepingTicks = 0;
             try {
                 if (rankStore.hasSnapshot()) {
-                    // Restore before normal player joins can repopulate an empty ranking table.
+                    // The add-on's file is the restart authority. Restore the exact
+                    // last-known Top 10 before ordinary joins can rebuild an empty list.
                     bridge.restoreRanks(rankStore.snapshot());
+                    bridge.normalizeDisplayLabels();
+                    rankStore.replace(bridge.snapshotRanks());
                     bridge.refreshOnlineNametags(server);
                     System.out.println("[ChillZonePvPRankAdmin] Restored saved PvP rankings after server start.");
                 } else {
@@ -82,12 +87,34 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
             }
         });
 
-        // Combat-Ranked automatically assigns unranked players when they join.
-        // Enforce /pvprank remove as a persistent exclusion once per second,
-        // and quietly keep our independent rank backup synchronized.
+        // Make one final best-effort capture during a normal stop/restart. An
+        // unexpected empty Combat-Ranked table is never allowed to erase a
+        // non-empty last-known-good backup here.
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+            if (bridge == null || !startupRestoreFinished) return;
+            try {
+                syncAutomaticRankBackup();
+            } catch (ReflectiveOperationException e) {
+                System.err.println("[ChillZonePvPRankAdmin] Could not save PvP ranks during shutdown: " + e.getMessage());
+            }
+        });
+
+        // Capture Combat-Ranked's order every server tick. RankStore only writes
+        // when the list actually changes, so a normal PvP kill/swap is persisted
+        // immediately without replacing Combat-Ranked's own kill logic.
         ServerTickEvents.END_SERVER_TICK.register(server -> {
-            if (++ticks < 20 || bridge == null || !startupRestoreFinished) return;
-            ticks = 0;
+            if (bridge == null || !startupRestoreFinished) return;
+
+            try {
+                syncAutomaticRankBackup();
+            } catch (ReflectiveOperationException e) {
+                System.err.println("[ChillZonePvPRankAdmin] Could not update PvP rank backup: " + e.getMessage());
+            }
+
+            // Slower housekeeping: persistent removals and nametag formatting.
+            if (++housekeepingTicks < 20) return;
+            housekeepingTicks = 0;
+
             boolean changed = false;
             for (ServerPlayer p : server.getPlayerList().getPlayers()) {
                 if (!exclusions.contains(p.getUUID())) continue;
@@ -101,12 +128,20 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
                     System.err.println("[ChillZonePvPRankAdmin] Failed to enforce removed rank: " + e.getMessage());
                 }
             }
-            if (changed) bridge.refreshOnlineNametags(server);
-
             try {
-                rankStore.replace(bridge.snapshotRanks());
+                if (bridge.normalizeDisplayLabels()) changed = true;
             } catch (ReflectiveOperationException e) {
-                System.err.println("[ChillZonePvPRankAdmin] Could not update PvP rank backup: " + e.getMessage());
+                System.err.println("[ChillZonePvPRankAdmin] Could not normalize PvP rank labels: " + e.getMessage());
+            }
+
+            if (changed) {
+                try {
+                    // This can intentionally become empty if an admin removal caused it.
+                    syncRankBackup();
+                } catch (ReflectiveOperationException e) {
+                    System.err.println("[ChillZonePvPRankAdmin] Could not save PvP ranks after housekeeping: " + e.getMessage());
+                }
+                bridge.refreshOnlineNametags(server);
             }
         });
     }
@@ -228,6 +263,17 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
 
     private static void syncRankBackup() throws ReflectiveOperationException {
         rankStore.replace(bridge.snapshotRanks());
+    }
+
+    private static void syncAutomaticRankBackup() throws ReflectiveOperationException {
+        List<RankStore.StoredRank> live = bridge.snapshotRanks();
+        List<RankStore.StoredRank> saved = rankStore.snapshot();
+
+        // Combat-Ranked can briefly appear empty while starting/stopping. Never
+        // let that transient state erase a real saved Top 10. Intentional admin
+        // clears use rankStore.clear()/syncRankBackup() directly and still work.
+        if (live.isEmpty() && !saved.isEmpty()) return;
+        rankStore.replace(live);
     }
 
     private static int fail(CommandSourceStack source, Exception e) {

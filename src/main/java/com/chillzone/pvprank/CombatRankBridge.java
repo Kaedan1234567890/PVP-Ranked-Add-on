@@ -52,7 +52,7 @@ final class CombatRankBridge {
 
     void setPosition(Object data, int pos) throws IllegalAccessException {
         rankPosition.setInt(data, pos);
-        rank.set(data, pos < 1 ? "unranked" : "Rank #" + pos);
+        rank.set(data, pos < 1 ? "Unranked" : "[#" + pos + "]");
     }
 
     void setPlayerName(Object data, String name) throws IllegalAccessException {
@@ -61,6 +61,21 @@ final class CombatRankBridge {
 
     void save() throws ReflectiveOperationException {
         save.invoke(null);
+    }
+
+    boolean normalizeDisplayLabels() throws ReflectiveOperationException {
+        boolean changed = false;
+        for (Object data : all().values()) {
+            int pos = position(data);
+            String desired = pos < 1 ? "Unranked" : "[#" + pos + "]";
+            Object current = rank.get(data);
+            if (current == null || !desired.equals(current.toString())) {
+                rank.set(data, desired);
+                changed = true;
+            }
+        }
+        if (changed) save();
+        return changed;
     }
 
     void refreshOnlineNametags(MinecraftServer server) {

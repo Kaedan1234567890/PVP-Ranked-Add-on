@@ -48,3 +48,17 @@ This version adds an independent rank backup at:
 `config/chillzone-pvprank-admin/saved-ranks.json`
 
 On server start, the add-on restores the last saved ranking list into Combat-Ranked before normal play. During runtime it quietly keeps that backup synchronized, including rank changes made by normal Combat-Ranked gameplay. `/pvprank resetall confirm` intentionally saves an empty list so a deliberate reset stays reset after restart.
+
+## Name-tag rank format (0.1.2-alpha)
+- Ranked players use the compact label `[#1]`, `[#2]`, `[#3]`, etc.
+- Players without a PvP rank continue to display `Unranked`.
+- The add-on also normalizes these labels during its quiet once-per-second sync, so ranks changed by Combat-Ranked itself are converted to the compact format too.
+
+## 0.1.3-alpha durability change
+- The Top 10 backup is checked every server tick, but the JSON file is only rewritten when the ranking order actually changes.
+- Normal Combat-Ranked kill swaps are therefore captured immediately and remain the source of gameplay rank changes.
+- A normal server stop/restart performs one final best-effort rank capture.
+- A temporary empty Combat-Ranked table during startup/shutdown cannot overwrite a non-empty saved Top 10.
+- Rank saves use a temporary file + atomic replacement when supported, reducing the chance of a half-written save file.
+- Saved positions are restricted to unique Top 10 slots (#1-#10).
+- `/pvprank resetall confirm` still intentionally stores an empty list, so a deliberate owner reset remains empty after restart.
