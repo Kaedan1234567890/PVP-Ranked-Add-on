@@ -9,30 +9,17 @@ Operator-only administrative add-on for the exact Combat-Ranked Fabric 26.2 mod 
 - Combat-Ranked (`mod id: combat`)
 
 ## Permission
-Only Minecraft server operators (OPs) and the server console can use `/pvprank` commands. Non-OP players cannot use or modify these controls. LuckPerms is not required by this add-on in 0.1.7-alpha.
-
-If desired later, Owner-group/LuckPerms access can be added back as an additional permission path.
+All `/pvprank` commands are restricted to Minecraft server operators (OPs) and the server console. Non-OP players cannot use or modify these admin controls. LuckPerms is not required by this add-on.
 
 ## Commands
-- `/pvprank on` — turn the PvP ranking system on and restore the saved Top 10.
-- `/pvprank off` — pause the PvP ranking system, preserve the current Top 10, and keep live ranks cleared while off.
-- `/pvprank toggle` — switch the PvP ranking system between on and off.
-- `/pvprank status` — show whether PvP rankings are currently on or off.
-- `/pvprank set <player> <1-10>` — move an online player to that rank; other ranks shift to keep positions unique. Requires rankings ON.
-- `/pvprank remove <player>` — remove an online player from rankings and keep them unranked until an operator uses `set` or `reset`. Requires rankings ON.
-- `/pvprank swap <player1> <player2>` — swap two online players' current rank positions. Requires rankings ON.
-- `/pvprank reset <player>` — re-enable the player and move them to the bottom of the current rankings. Requires rankings ON.
-- `/pvprank list` — list live rankings while ON, or the preserved saved order while OFF.
-- `/pvprank nametag toggle` — flip between compact and full nametag style.
-- `/pvprank nametag compact` — use `[#2]`.
-- `/pvprank nametag full` — use Combat-Ranked's native `[Rank #2]`.
-- `/pvprank nametag status` (or `/pvprank nametag`) — show the current nametag style.
-- `/pvprank resetall confirm` — intentionally clear every live and saved rank.
+- `/pvprank set <player> <1-10>` — move an online player to that rank; other ranks shift to keep positions unique.
+- `/pvprank remove <player>` — remove an online player from rankings and keep them unranked until an owner uses `set` or `reset`.
+- `/pvprank swap <player1> <player2>` — swap two online players' current rank positions.
+- `/pvprank reset <player>` — re-enable the player and move them to the bottom of the current rankings.
+- `/pvprank list` — list stored rankings.
+- `/pvprank resetall confirm` — clear every rank. Combat-Ranked will assign ranks again through its normal behavior.
 
 All player arguments suggest ONLY players currently online. This naturally includes Java and Bedrock players that appear in the server's normal online player list.
-
-### PvP on/off behavior
-`OFF` is a pause, not a destructive reset. The add-on saves the current Top 10 before turning off, clears Combat-Ranked's live ranking table, and continuously removes any ranks Combat-Ranked tries to create while the system is off. Turning the system back `ON` restores the saved Top 10 and then normal Combat-Ranked kill-based rank swaps continue as before. The on/off choice is saved in `config/chillzone-pvprank-admin/settings.json` and survives restarts.
 
 ## Compatibility approach
 This add-on does not modify or redistribute Combat-Ranked. It talks to the exact public runtime classes/fields found in the uploaded Combat-Ranked 1.0.0 Fabric 26.2 JAR:
@@ -68,7 +55,7 @@ On server start, the add-on restores the last saved ranking list into Combat-Ran
 Combat-Ranked 1.0.0 formats the visible scoreboard-team prefix separately from the stored `PlayerData.rank` text. This version therefore patches the actual live team prefix after Combat-Ranked updates it. Ranked players are forced to display `[#1]`, `[#2]`, etc. while the existing `Unranked` display is left unchanged. The prefix style/color already supplied by Combat-Ranked is preserved. The add-on re-checks online ranked players once per second so Combat-Ranked cannot quietly change the wording back to `[Rank #N]`.
 
 ## 0.1.5-alpha toggleable nametag style
-The owner can now switch the ranked-player nametag wording without rebuilding the mod:
+An operator can switch the ranked-player nametag wording without rebuilding the mod:
 
 - `/pvprank nametag toggle` — flip between compact and full style.
 - `/pvprank nametag compact` — force `[#2]`.
@@ -77,16 +64,5 @@ The owner can now switch the ranked-player nametag wording without rebuilding th
 
 The selected style is saved at `config/chillzone-pvprank-admin/settings.json` and survives server restarts. `Unranked` is unchanged in both modes. The default on first run is compact mode.
 
-## 0.1.6-alpha PvP on/off + OP-only controls
-- Added `/pvprank on`, `/pvprank off`, `/pvprank toggle`, and `/pvprank status`.
-- OFF pauses rankings while preserving the saved Top 10; ON restores it and resumes normal Combat-Ranked gameplay changes.
-- The enabled/disabled state survives server restarts. Existing 0.1.5 settings files default to ON when upgraded.
-- All `/pvprank` commands are now restricted to Minecraft OPs and the server console.
-- LuckPerms is no longer a required dependency for this add-on.
-
-
-## 0.1.7-alpha Minecraft 26.2 OP-check build fix
-- Fixed the Minecraft 26.2 compile error in `Permissions.java`.
-- Minecraft 26.2 `PlayerList.isOp(...)` expects the newer `NameAndId` identity object instead of a `GameProfile`.
-- OP checks now use `player.nameAndId()`, keeping `/pvprank` restricted to server operators and the console as intended.
-- No PvP ranking, persistence, nametag, or toggle behavior was removed by this fix.
+## 0.1.9-alpha clean OP-only build
+This build intentionally returns to the 0.1.5 feature set and adds only the corrected Minecraft 26.2 operator permission gate. It does **not** include the add-on's experimental PvP ranking ON/OFF commands; use Combat-Ranked's own built-in enable/disable system instead. It also does not include the later chat/message filtering experiment. Restart persistence, normal Combat-Ranked kill-based rank changes, online-player autocomplete, `Unranked`, and the global compact/full nametag controls remain included.

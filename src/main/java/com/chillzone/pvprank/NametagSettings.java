@@ -12,7 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 
-/** Persists PvP-rank settings across restarts. */
+/** Persists the owner's selected PvP nametag wording across restarts. */
 final class NametagSettings {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path FILE = FabricLoader.getInstance().getConfigDir()
@@ -22,27 +22,19 @@ final class NametagSettings {
 
     private static final class Config {
         boolean compactNametags = true;
-        // Wrapper type is intentional: old 0.1.5 settings files do not contain
-        // this field, so null means the backwards-compatible default: ON.
-        Boolean rankingEnabled = null;
     }
 
     private boolean compact = true;
-    private boolean rankingEnabled = true;
 
     void load() {
         compact = true;
-        rankingEnabled = true;
         if (!Files.exists(FILE)) return;
 
         try (Reader reader = Files.newBufferedReader(FILE)) {
             Config config = GSON.fromJson(reader, Config.class);
-            if (config != null) {
-                compact = config.compactNametags;
-                rankingEnabled = config.rankingEnabled == null || config.rankingEnabled;
-            }
+            if (config != null) compact = config.compactNametags;
         } catch (Exception e) {
-            System.err.println("[ChillZonePvPRankAdmin] Could not load settings; using defaults: " + e.getMessage());
+            System.err.println("[ChillZonePvPRankAdmin] Could not load nametag settings; using compact mode: " + e.getMessage());
         }
     }
 
@@ -55,21 +47,11 @@ final class NametagSettings {
         save();
     }
 
-    boolean isRankingEnabled() {
-        return rankingEnabled;
-    }
-
-    void setRankingEnabled(boolean enabled) {
-        this.rankingEnabled = enabled;
-        save();
-    }
-
     private void save() {
         try {
             Files.createDirectories(FILE.getParent());
             Config config = new Config();
             config.compactNametags = compact;
-            config.rankingEnabled = rankingEnabled;
 
             try (Writer writer = Files.newBufferedWriter(TEMP_FILE)) {
                 GSON.toJson(config, writer);
@@ -83,7 +65,7 @@ final class NametagSettings {
                 Files.move(TEMP_FILE, FILE, StandardCopyOption.REPLACE_EXISTING);
             }
         } catch (IOException e) {
-            System.err.println("[ChillZonePvPRankAdmin] Could not save settings: " + e.getMessage());
+            System.err.println("[ChillZonePvPRankAdmin] Could not save nametag settings: " + e.getMessage());
         } finally {
             try { Files.deleteIfExists(TEMP_FILE); } catch (IOException ignored) {}
         }

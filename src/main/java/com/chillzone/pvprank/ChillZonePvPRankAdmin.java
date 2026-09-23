@@ -61,10 +61,6 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
                     .then(Commands.argument("player", StringArgumentType.word()).suggests(ONLINE_PLAYERS)
                         .executes(ctx -> resetRank(ctx.getSource(), StringArgumentType.getString(ctx, "player")))))
                 .then(Commands.literal("list").executes(ctx -> listRanks(ctx.getSource())))
-                .then(Commands.literal("status").executes(ctx -> rankingStatus(ctx.getSource())))
-                .then(Commands.literal("on").executes(ctx -> setRankingEnabled(ctx.getSource(), true)))
-                .then(Commands.literal("off").executes(ctx -> setRankingEnabled(ctx.getSource(), false)))
-                .then(Commands.literal("toggle").executes(ctx -> toggleRanking(ctx.getSource())))
                 .then(Commands.literal("nametag")
                     .executes(ctx -> nametagStatus(ctx.getSource()))
                     .then(Commands.literal("status").executes(ctx -> nametagStatus(ctx.getSource())))
@@ -81,16 +77,7 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
             startupRestoreFinished = false;
             housekeepingTicks = 0;
             try {
-                if (!nametagSettings.isRankingEnabled()) {
-                    // OFF is a pause: preserve the last known ranking order, but keep
-                    // Combat-Ranked's live table empty until an operator turns it on.
-                    if (!rankStore.hasSnapshot()) {
-                        rankStore.replace(bridge.snapshotRanks());
-                    }
-                    bridge.clearAllRanks();
-                    bridge.refreshOnlineNametags(server);
-                    System.out.println("[ChillZonePvPRankAdmin] PvP rankings are OFF; saved ranks were preserved.");
-                } else if (rankStore.hasSnapshot()) {
+                if (rankStore.hasSnapshot()) {
                     // The add-on's file is the restart authority. Restore the exact
                     // last-known Top 10 before ordinary joins can rebuild an empty list.
                     bridge.restoreRanks(rankStore.snapshot());
@@ -105,7 +92,7 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
                 }
                 startupRestoreFinished = true;
             } catch (ReflectiveOperationException e) {
-                System.err.println("[ChillZonePvPRankAdmin] Could not initialize saved PvP rankings: " + e.getMessage());
+                System.err.println("[ChillZonePvPRankAdmin] Could not restore saved PvP rankings: " + e.getMessage());
             }
         });
 
@@ -113,7 +100,7 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
         // unexpected empty Combat-Ranked table is never allowed to erase a
         // non-empty last-known-good backup here.
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
-            if (bridge == null || !startupRestoreFinished || !nametagSettings.isRankingEnabled()) return;
+            if (bridge == null || !startupRestoreFinished) return;
             try {
                 syncAutomaticRankBackup();
             } catch (ReflectiveOperationException e) {
@@ -126,21 +113,6 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
         // immediately without replacing Combat-Ranked's own kill logic.
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             if (bridge == null || !startupRestoreFinished) return;
-
-            if (!nametagSettings.isRankingEnabled()) {
-                // Combat-Ranked may try to create/change ranks from joins or kills. While
-                // the system is OFF, erase any live rank immediately without touching
-                // the preserved Chill Zone backup.
-                try {
-                    if (!bridge.snapshotRanks().isEmpty()) {
-                        bridge.clearAllRanks();
-                        bridge.refreshOnlineNametags(server);
-                    }
-                } catch (ReflectiveOperationException e) {
-                    System.err.println("[ChillZonePvPRankAdmin] Could not enforce PvP rankings OFF state: " + e.getMessage());
-                }
-                return;
-            }
 
             try {
                 syncAutomaticRankBackup();
@@ -200,14 +172,8 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
         return false;
     }
 
-    private static boolean rankingActive(CommandSourceStack source) {
-        if (nametagSettings.isRankingEnabled()) return true;
-        source.sendFailure(Component.literal("PvP rankings are OFF. Use /pvprank on first."));
-        return false;
-    }
-
     private static int setRank(CommandSourceStack source, String name, int rank) {
-        if (!ready(source) || !rankingActive(source)) return 0;
+        if (!ready(source)) return 0;
         ServerPlayer p = online(source, name); if (p == null) return 0;
         try {
             exclusions.remove(p.getUUID());
@@ -222,7 +188,7 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
     }
 
     private static int removeRank(CommandSourceStack source, String name) {
-        if (!ready(source) || !rankingActive(source)) return 0;
+        if (!ready(source)) return 0;
         ServerPlayer p = online(source, name); if (p == null) return 0;
         try {
             exclusions.add(p.getUUID());
@@ -238,7 +204,7 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
     }
 
     private static int swapRanks(CommandSourceStack source, String aName, String bName) {
-        if (!ready(source) || !rankingActive(source)) return 0;
+        if (!ready(source)) return 0;
         ServerPlayer a = online(source, aName); if (a == null) return 0;
         ServerPlayer b = online(source, bName); if (b == null) return 0;
         if (a.getUUID().equals(b.getUUID())) {
@@ -259,7 +225,7 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
     }
 
     private static int resetRank(CommandSourceStack source, String name) {
-        if (!ready(source) || !rankingActive(source)) return 0;
+        if (!ready(source)) return 0;
         ServerPlayer p = online(source, name); if (p == null) return 0;
         try {
             exclusions.remove(p.getUUID());
@@ -275,25 +241,9 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
 
     private static int listRanks(CommandSourceStack source) {
         if (!ready(source)) return 0;
-
-        if (!nametagSettings.isRankingEnabled()) {
-            List<RankStore.StoredRank> saved = rankStore.snapshot();
-            source.sendSuccess(() -> Component.literal("--- PvP Rankings (OFF - saved order) ---"), false);
-            if (saved.isEmpty()) {
-                source.sendSuccess(() -> Component.literal("No saved ranked players."), false);
-                return 1;
-            }
-            for (RankStore.StoredRank entry : saved) {
-                String name = entry.name == null || entry.name.isBlank() ? entry.uuid.toString() : entry.name;
-                int pos = entry.position;
-                source.sendSuccess(() -> Component.literal("#" + pos + " - " + name), false);
-            }
-            return 1;
-        }
-
         try {
             List<Map.Entry<UUID, Object>> list = bridge.rankedEntries();
-            source.sendSuccess(() -> Component.literal("--- PvP Rankings (ON) ---"), false);
+            source.sendSuccess(() -> Component.literal("--- PvP Rankings ---"), false);
             if (list.isEmpty()) {
                 source.sendSuccess(() -> Component.literal("No ranked players."), false);
                 return 1;
@@ -303,50 +253,6 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
                 String name = bridge.name(e.getValue());
                 source.sendSuccess(() -> Component.literal("#" + pos + " - " + name), false);
             }
-            return 1;
-        } catch (ReflectiveOperationException e) {
-            return fail(source, e);
-        }
-    }
-
-    private static int rankingStatus(CommandSourceStack source) {
-        String state = nametagSettings.isRankingEnabled() ? "ON" : "OFF";
-        source.sendSuccess(() -> Component.literal("PvP ranking system: " + state), false);
-        return 1;
-    }
-
-    private static int toggleRanking(CommandSourceStack source) {
-        return setRankingEnabled(source, !nametagSettings.isRankingEnabled());
-    }
-
-    private static int setRankingEnabled(CommandSourceStack source, boolean enabled) {
-        if (!ready(source)) return 0;
-
-        try {
-            if (enabled == nametagSettings.isRankingEnabled()) {
-                String state = enabled ? "ON" : "OFF";
-                source.sendSuccess(() -> Component.literal("PvP ranking system is already " + state + "."), false);
-                return 1;
-            }
-
-            if (!enabled) {
-                // Capture the current order before pausing, then clear only the live
-                // Combat-Ranked table. The Chill Zone backup remains untouched.
-                syncAutomaticRankBackup();
-                nametagSettings.setRankingEnabled(false);
-                bridge.clearAllRanks();
-                bridge.refreshOnlineNametags(source.getServer());
-                source.sendSuccess(() -> Component.literal("PvP ranking system turned OFF. The current Top 10 was saved and paused."), false);
-                return 1;
-            }
-
-            nametagSettings.setRankingEnabled(true);
-            if (rankStore.hasSnapshot()) {
-                bridge.restoreRanks(rankStore.snapshot());
-            }
-            bridge.normalizeDisplayLabels();
-            bridge.refreshOnlineNametags(source.getServer());
-            source.sendSuccess(() -> Component.literal("PvP ranking system turned ON. Saved ranks were restored and normal kill-based rank changes are active."), false);
             return 1;
         } catch (ReflectiveOperationException e) {
             return fail(source, e);
@@ -385,10 +291,7 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
             exclusions.clear();
             rankStore.clear();
             bridge.refreshOnlineNametags(source.getServer());
-            String suffix = nametagSettings.isRankingEnabled()
-                    ? " Players can receive ranks again through Combat-Ranked's normal system."
-                    : " PvP rankings are currently OFF, so the list will remain empty until you turn them on.";
-            source.sendSuccess(() -> Component.literal("All PvP ranks were cleared." + suffix), false);
+            source.sendSuccess(() -> Component.literal("All PvP ranks were cleared. Players will receive ranks again through Combat-Ranked's normal system."), false);
             return 1;
         } catch (ReflectiveOperationException e) {
             return fail(source, e);

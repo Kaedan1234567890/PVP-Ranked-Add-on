@@ -7,7 +7,8 @@ final class Permissions {
     private Permissions() {}
 
     static boolean canAdmin(CommandSourceStack source) {
-        // Server console / command blocks are allowed. Players must be server operators.
+        // Server console / non-player command sources are allowed.
+        // Players must be Minecraft server operators (OPs).
         if (!(source.getEntity() instanceof ServerPlayer player)) return true;
         return source.getServer().getPlayerList().isOp(player.nameAndId());
     }
