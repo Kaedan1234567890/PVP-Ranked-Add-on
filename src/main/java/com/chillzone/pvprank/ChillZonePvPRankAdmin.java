@@ -5,6 +5,7 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -17,7 +18,9 @@ import java.util.*;
 public final class ChillZonePvPRankAdmin implements ModInitializer {
     private static CombatRankBridge bridge;
     private static final ExclusionStore exclusions = new ExclusionStore();
+    private static final RankStore rankStore = new RankStore();
     private static int ticks;
+    private static boolean startupRestoreFinished;
 
     private static final SuggestionProvider<CommandSourceStack> ONLINE_PLAYERS = (ctx, builder) -> {
         for (ServerPlayer p : ctx.getSource().getServer().getPlayerList().getPlayers()) {
@@ -29,6 +32,7 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
     @Override
     public void onInitialize() {
         exclusions.load();
+        rankStore.load();
         try {
             bridge = new CombatRankBridge();
             System.out.println("[ChillZonePvPRankAdmin] Connected to Combat-Ranked.");
@@ -59,10 +63,30 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
             );
         });
 
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+            if (bridge == null) return;
+            try {
+                if (rankStore.hasSnapshot()) {
+                    // Restore before normal player joins can repopulate an empty ranking table.
+                    bridge.restoreRanks(rankStore.snapshot());
+                    bridge.refreshOnlineNametags(server);
+                    System.out.println("[ChillZonePvPRankAdmin] Restored saved PvP rankings after server start.");
+                } else {
+                    // First run of this version: adopt Combat-Ranked's current list as the baseline.
+                    rankStore.replace(bridge.snapshotRanks());
+                    System.out.println("[ChillZonePvPRankAdmin] Created initial PvP rank backup.");
+                }
+                startupRestoreFinished = true;
+            } catch (ReflectiveOperationException e) {
+                System.err.println("[ChillZonePvPRankAdmin] Could not restore saved PvP rankings: " + e.getMessage());
+            }
+        });
+
         // Combat-Ranked automatically assigns unranked players when they join.
-        // Enforce /pvprank remove as a persistent exclusion once per second.
+        // Enforce /pvprank remove as a persistent exclusion once per second,
+        // and quietly keep our independent rank backup synchronized.
         ServerTickEvents.END_SERVER_TICK.register(server -> {
-            if (++ticks < 20 || bridge == null) return;
+            if (++ticks < 20 || bridge == null || !startupRestoreFinished) return;
             ticks = 0;
             boolean changed = false;
             for (ServerPlayer p : server.getPlayerList().getPlayers()) {
@@ -78,6 +102,12 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
                 }
             }
             if (changed) bridge.refreshOnlineNametags(server);
+
+            try {
+                rankStore.replace(bridge.snapshotRanks());
+            } catch (ReflectiveOperationException e) {
+                System.err.println("[ChillZonePvPRankAdmin] Could not update PvP rank backup: " + e.getMessage());
+            }
         });
     }
 
@@ -101,6 +131,7 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
         try {
             exclusions.remove(p.getUUID());
             bridge.moveTo(p.getUUID(), p.getGameProfile().name(), rank);
+            syncRankBackup();
             bridge.refreshOnlineNametags(source.getServer());
             source.sendSuccess(() -> Component.literal("Set " + p.getGameProfile().name() + " to PvP Rank #" + rank + "."), false);
             return 1;
@@ -115,6 +146,7 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
         try {
             exclusions.add(p.getUUID());
             int old = bridge.removeAndCompact(p.getUUID());
+            syncRankBackup();
             bridge.refreshOnlineNametags(source.getServer());
             String suffix = old < 1 ? " (already unranked)" : " (was #" + old + ")";
             source.sendSuccess(() -> Component.literal("Removed " + p.getGameProfile().name() + " from PvP rankings" + suffix + "."), false);
@@ -136,6 +168,7 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
             exclusions.remove(a.getUUID());
             exclusions.remove(b.getUUID());
             bridge.swap(a.getUUID(), a.getGameProfile().name(), b.getUUID(), b.getGameProfile().name());
+            syncRankBackup();
             bridge.refreshOnlineNametags(source.getServer());
             source.sendSuccess(() -> Component.literal("Swapped PvP ranks for " + a.getGameProfile().name() + " and " + b.getGameProfile().name() + "."), false);
             return 1;
@@ -150,6 +183,7 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
         try {
             exclusions.remove(p.getUUID());
             int newRank = bridge.moveToBottom(p.getUUID(), p.getGameProfile().name());
+            syncRankBackup();
             bridge.refreshOnlineNametags(source.getServer());
             source.sendSuccess(() -> Component.literal("Reset " + p.getGameProfile().name() + " to the bottom of the PvP rankings (#" + newRank + ")."), false);
             return 1;
@@ -183,12 +217,17 @@ public final class ChillZonePvPRankAdmin implements ModInitializer {
         try {
             bridge.clearAllRanks();
             exclusions.clear();
+            rankStore.clear();
             bridge.refreshOnlineNametags(source.getServer());
             source.sendSuccess(() -> Component.literal("All PvP ranks were cleared. Players will receive ranks again through Combat-Ranked's normal system."), false);
             return 1;
         } catch (ReflectiveOperationException e) {
             return fail(source, e);
         }
+    }
+
+    private static void syncRankBackup() throws ReflectiveOperationException {
+        rankStore.replace(bridge.snapshotRanks());
     }
 
     private static int fail(CommandSourceStack source, Exception e) {

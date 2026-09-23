@@ -40,3 +40,11 @@ This add-on does not modify or redistribute Combat-Ranked. It talks to the exact
 - `com.combat.CombatMod.updatePlayerNametag`
 
 Combat-Ranked stores its data at `config/combat/combat_data.json`.
+
+## 0.1.1 restart-persistence change
+
+This version adds an independent rank backup at:
+
+`config/chillzone-pvprank-admin/saved-ranks.json`
+
+On server start, the add-on restores the last saved ranking list into Combat-Ranked before normal play. During runtime it quietly keeps that backup synchronized, including rank changes made by normal Combat-Ranked gameplay. `/pvprank resetall confirm` intentionally saves an empty list so a deliberate reset stays reset after restart.

@@ -87,6 +87,30 @@ final class CombatRankBridge {
         return list;
     }
 
+
+    List<RankStore.StoredRank> snapshotRanks() throws ReflectiveOperationException {
+        List<RankStore.StoredRank> snapshot = new ArrayList<>();
+        for (Map.Entry<UUID, Object> e : rankedEntries()) {
+            Object data = e.getValue();
+            snapshot.add(new RankStore.StoredRank(e.getKey(), name(data), position(data)));
+        }
+        return snapshot;
+    }
+
+    void restoreRanks(List<RankStore.StoredRank> savedRanks) throws ReflectiveOperationException {
+        // Clear the in-memory Combat-Ranked table first, then restore the exact
+        // saved positions in one pass and perform a single save at the end.
+        for (Object data : all().values()) setPosition(data, -1);
+
+        for (RankStore.StoredRank saved : savedRanks) {
+            if (saved == null || saved.uuid == null || saved.position < 1) continue;
+            Object data = getOrCreate(saved.uuid);
+            if (saved.name != null && !saved.name.isBlank()) setPlayerName(data, saved.name);
+            setPosition(data, saved.position);
+        }
+        save();
+    }
+
     void moveTo(UUID id, String currentName, int newPos) throws ReflectiveOperationException {
         Map<UUID, Object> all = all();
         Object target = getOrCreate(id);
