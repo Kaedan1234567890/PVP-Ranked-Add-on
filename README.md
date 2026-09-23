@@ -9,7 +9,7 @@ Operator-only administrative add-on for the exact Combat-Ranked Fabric 26.2 mod 
 - Combat-Ranked (`mod id: combat`)
 
 ## Permission
-Only Minecraft server operators (OPs) and the server console can use `/pvprank` commands. Non-OP players cannot use or modify these controls. LuckPerms is not required by this add-on in 0.1.6-alpha.
+Only Minecraft server operators (OPs) and the server console can use `/pvprank` commands. Non-OP players cannot use or modify these controls. LuckPerms is not required by this add-on in 0.1.7-alpha.
 
 If desired later, Owner-group/LuckPerms access can be added back as an additional permission path.
 
@@ -83,3 +83,10 @@ The selected style is saved at `config/chillzone-pvprank-admin/settings.json` an
 - The enabled/disabled state survives server restarts. Existing 0.1.5 settings files default to ON when upgraded.
 - All `/pvprank` commands are now restricted to Minecraft OPs and the server console.
 - LuckPerms is no longer a required dependency for this add-on.
+
+
+## 0.1.7-alpha Minecraft 26.2 OP-check build fix
+- Fixed the Minecraft 26.2 compile error in `Permissions.java`.
+- Minecraft 26.2 `PlayerList.isOp(...)` expects the newer `NameAndId` identity object instead of a `GameProfile`.
+- OP checks now use `player.nameAndId()`, keeping `/pvprank` restricted to server operators and the console as intended.
+- No PvP ranking, persistence, nametag, or toggle behavior was removed by this fix.
